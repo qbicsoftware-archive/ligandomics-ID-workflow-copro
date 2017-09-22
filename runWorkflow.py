@@ -48,6 +48,12 @@ subprocess.call(commandDecoy.split(), stderr=logfile, stdout=logfile)
 
 idFiles = []
 
+
+#mzmlFiles = ['/lustre_cfc/qbic/chris/playground/ligandomicsID/data/spectra_comet.mzML', '/lustre_cfc/qbic/chris/playground/ligandomicsID/data/spectra_comet_2.mzML', '/lustre_cfc/qbic/chris/playground/ligandomicsID/data/spectra_comet_3.mzML']
+#idFiles = ['/lustre_cfc/qbic/chris/playground/ligandomicsID/data/spectra_comet.idXML', '/lustre_cfc/qbic/chris/playground/ligandomicsID/data/spectra_comet_2.idXML', '/lustre_cfc/qbic/chris/playground/ligandomicsID/data/spectra_comet_3.idXML']
+
+mzmlFiles = ['1.mzML', '2.mzML', '3.mzML']
+
 for mzml in mzmlFiles:
     if mzml.endswith('.gz'):
         logfile.write("Extracting gzipped content... \n")
@@ -72,6 +78,26 @@ for mzml in mzmlFiles:
     subprocess.call(peptideIndexer.split()  + ["unspecific cleavage"],stderr=logfile, stdout=logfile)
 
     idFiles.append(idPath)
+
+
+
+############# insert id based map transformation
+
+alignedMaps=[a.replace('.idXML', '_aligned.idXML') for a in idFiles]
+trafoMaps=[a.replace('.idXML', '.trafoXML') for a in idFiles]
+MapAlignerID = 'MapAlignerIdentification -in {f} -out {o} -trafo_out {t} -threads 20'.format(f=" ".join(idFiles), o=" ".join(alignedMaps), t=" ".join(trafoMaps))
+subprocess.call(MapAlignerID.split(), stderr=logfile, stdout=logfile)
+
+for Map in trafoMaps:
+    mzml = mzmlFiles[trafoMaps.index(Map)]
+    trafoMZML=mzml.replace('.mzML', '_trafo.mzML')
+    MapTransformer = 'MapRTTransformer -in {f} -out {o} -trafo_in {m} -threads 20'.format(m=Map, f=mzml, o=trafoMZML)
+    subprocess.call(MapTransformer.split(), stderr=logfile, stdout=logfile)
+
+idFiles=alignedMaps
+#############
+
+
 
 ### predict hits of fitting length and calc FDR and PEP
 #FDR calc
@@ -116,9 +142,9 @@ files = [i for i in idFiles]
 for file in files:
    internal=idresult_filtered
    ### map percolator refined and FDR filtered ids onto features
-   mergeresult = os.path.join(result_path, internal.replace('idXML', 'featureXML').split('/')[-1])
+   mergeresult = os.path.join(result_path, file.replace('idXML', 'featureXML').split('/')[-1])
    features.append(mergeresult)
-   IDMapper = 'FeatureFinderIdentification -in {f} -id {i} -threads 20 -out {o}'.format(f=file.replace('.idXML','.mzML'),i=internal,o=mergeresult)
+   IDMapper = 'FeatureFinderIdentification -in {f} -id {i} -threads 20 -out {o}'.format(f=file.replace('_aligned.idXML','_trafo.mzML'),i=internal,o=mergeresult)
    subprocess.call(IDMapper.split(),stderr=logfile, stdout=logfile)
 
 ## FeatureLinking
