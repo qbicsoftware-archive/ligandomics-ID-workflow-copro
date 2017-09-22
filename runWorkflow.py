@@ -32,6 +32,7 @@ fbo = float(ctd_params['fbo'])
 fdr = float(ctd_params['fdr'])
 num_hits = int(ctd_params['noh'])
 dmr = ctd_params['dmr']
+msLevels = ctd_params['ms_levels']
 
 logfilename = 'ligandomicsID_v2_0_coPro_workflow.logs'
 logfile = open(logfilename, 'w')
@@ -66,8 +67,8 @@ for mzml in mzmlFiles:
     identifier = mzml.split('/')[-1].split('.')[0]
 
     if ctd_params['centroided'] == 'false':
-        pickpeakcommand = 'PeakPickerHiRes -in {i} -out {o} -threads 20 -algorithm:ms_levels 1'
-        subprocess.call(pickpeakcommand.format(i=mzml, o=mzml).split(),stderr=logfile, stdout=logfile)
+        pickpeakcommand = 'PeakPickerHiRes -in {i} -out {o} -threads 20 -algorithm:ms_levels {m}'
+        subprocess.call(pickpeakcommand.format(i=mzml, o=mzml, m=msLevels).split(),stderr=logfile, stdout=logfile)
 
     ##### NEW  #####
 
