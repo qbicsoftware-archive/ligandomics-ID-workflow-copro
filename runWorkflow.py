@@ -49,12 +49,6 @@ subprocess.call(commandDecoy.split(), stderr=logfile, stdout=logfile)
 
 idFiles = []
 
-
-#mzmlFiles = ['/lustre_cfc/qbic/chris/playground/ligandomicsID/data/spectra_comet.mzML', '/lustre_cfc/qbic/chris/playground/ligandomicsID/data/spectra_comet_2.mzML', '/lustre_cfc/qbic/chris/playground/ligandomicsID/data/spectra_comet_3.mzML']
-#idFiles = ['/lustre_cfc/qbic/chris/playground/ligandomicsID/data/spectra_comet.idXML', '/lustre_cfc/qbic/chris/playground/ligandomicsID/data/spectra_comet_2.idXML', '/lustre_cfc/qbic/chris/playground/ligandomicsID/data/spectra_comet_3.idXML']
-
-mzmlFiles = ['1.mzML', '2.mzML', '3.mzML']
-
 for mzml in mzmlFiles:
     if mzml.endswith('.gz'):
         logfile.write("Extracting gzipped content... \n")
