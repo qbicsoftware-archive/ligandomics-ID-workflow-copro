@@ -78,6 +78,7 @@ for mzml in mzmlFiles:
 
 ############# insert id based map transformation
 
+mzmlFiles = [m.replace('.gz', '') for m in mzmlFiles]
 alignedMaps=[a.replace('.idXML', '_aligned.idXML') for a in idFiles]
 trafoMaps=[a.replace('.idXML', '.trafoXML') for a in idFiles]
 MapAlignerID = 'MapAlignerIdentification -in {f} -out {o} -trafo_out {t} -threads 20'.format(f=" ".join(idFiles), o=" ".join(alignedMaps), t=" ".join(trafoMaps))
