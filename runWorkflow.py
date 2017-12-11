@@ -34,6 +34,8 @@ fbo = float(ctd_params['fbo'])
 fdr = float(ctd_params['fdr'])
 num_hits = int(ctd_params['noh'])
 dmr = ctd_params['dmr']
+msLevels = ctd_params['ms_levels']
+centroided = ctd_params['centroided']
 
 logfilename = 'ligandomicsID_v2_0_coPro_workflow.logs'
 logfile = open(logfilename, 'w')
@@ -58,10 +60,10 @@ idFiles = []
 #for loop over replicate mzmls
 for mzml in mzmlFiles:
     if mzml.endswith('.gz'):
-    logfile.write("Extracting gzipped content... \n")
-    cmd = "gzip -d {f}".format(f=mzml)
-    os.system(cmd)
-    mzml = mzml.replace('.gz', '')
+        logfile.write("Extracting gzipped content... \n")
+        cmd = "gzip -d {f}".format(f=mzml)
+        os.system(cmd)
+        mzml = mzml.replace('.gz', '')
     idPath = mzml.replace('mzML', 'idXML')
     identifier = mzml.split('/')[-1].split('.')[0]
 
@@ -165,11 +167,11 @@ files = [i for i in idFiles]
 
 #assume all ids as internal ids
 for file in files:
-   internal=idresult_filtered
-   mergeresult = os.path.join(result_path, file.replace('idXML', 'featureXML').split('/')[-1])
-   features.append(mergeresult)
-   IDMapper = 'FeatureFinderIdentification -in {f} -id {i} -threads 5 -out {o}'.format(f=file.replace('.idXML','.mzML'),i=internal,o=mergeresult)
-   subprocess.call(IDMapper.split(),stderr=logfile, stdout=logfile)
+    internal=idresult_filtered
+    mergeresult = os.path.join(result_path, file.replace('idXML', 'featureXML').split('/')[-1])
+    features.append(mergeresult)
+    IDMapper = 'FeatureFinderIdentification -in {f} -id {i} -threads 5 -out {o}'.format(f=file.replace('.idXML','.mzML'),i=internal,o=mergeresult)
+    subprocess.call(IDMapper.split(),stderr=logfile, stdout=logfile)
 
 #Link features of all replicate mzmls to one consensus file
 mergeresult = os.path.join(result_path, idFiles[0].split('/')[-1].replace('idXML', 'consensusXML'))
@@ -193,10 +195,10 @@ df = []
 
 for i, r in enumerate(opr):
     if r.startswith('#PEPTIDE'):
-    header = r.strip().split('\t')[1:] + opr[i - 1].strip().split('\t')[1:]
+        header = r.strip().split('\t')[1:] + opr[i - 1].strip().split('\t')[1:]
     if r.startswith('PEPTIDE'):
-    if not opr[i-1].startswith('PEPTIDE'):
-        df.append(r.strip().split('\t')[1:] + opr[i - 1].strip().split('\t')[1:])
+        if not opr[i-1].startswith('PEPTIDE'):
+            df.append(r.strip().split('\t')[1:] + opr[i - 1].strip().split('\t')[1:])
 
 df=pd.DataFrame(df)
 df.columns=header
