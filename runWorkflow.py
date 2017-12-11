@@ -7,6 +7,8 @@ import pandas as pd
 from itertools import combinations
 
 
+
+#### QBIC QPortal parameter transfer #####
 pattern = re.compile('Q\w{4}[0-9]{3}[a-zA-Z]\w')
 
 wf_dir = sys.argv[1]
@@ -32,7 +34,6 @@ fbo = float(ctd_params['fbo'])
 fdr = float(ctd_params['fdr'])
 num_hits = int(ctd_params['noh'])
 dmr = ctd_params['dmr']
-msLevels = ctd_params['ms_levels']
 
 logfilename = 'ligandomicsID_v2_0_coPro_workflow.logs'
 logfile = open(logfilename, 'w')
@@ -44,122 +45,146 @@ else:
 
 fasta_decoy_path = os.path.join(data_path, 'proteinswithdecoys.fasta')
 
-commandDecoy = 'DecoyDatabase  -in {i} -out {o} -decoy_string XXX -decoy_string_position prefix'.format(i=fasta_path, o=fasta_decoy_path)
+############################################
+
+
+
+#generate reversed decoy database
+commandDecoy = 'DecoyDatabase  -in {i} -out {o} -decoy_string DECOY -decoy_string_position prefix'.format(i=fasta_path, o=fasta_decoy_path)
 subprocess.call(commandDecoy.split(), stderr=logfile, stdout=logfile)
 
 idFiles = []
 
+#for loop over replicate mzmls
 for mzml in mzmlFiles:
     if mzml.endswith('.gz'):
-        logfile.write("Extracting gzipped content... \n")
-        cmd = "gzip -d {f}".format(f=mzml)
-        os.system(cmd)
-        mzml = mzml.replace('.gz', '')
-
+    logfile.write("Extracting gzipped content... \n")
+    cmd = "gzip -d {f}".format(f=mzml)
+    os.system(cmd)
+    mzml = mzml.replace('.gz', '')
     idPath = mzml.replace('mzML', 'idXML')
-
     identifier = mzml.split('/')[-1].split('.')[0]
 
-    if ctd_params['centroided'] == 'false':
-        pickpeakcommand = 'PeakPickerHiRes -in {i} -out {o} -threads 20 -algorithm:ms_levels {m}'
-        subprocess.call(pickpeakcommand.format(i=mzml, o=mzml, m=msLevels).split(),stderr=logfile, stdout=logfile)
+    #run peak picker if not centroided
+    if centroided == 'false':
+        pickpeakcommand = 'PeakPickerHiRes -in {i} -out {o} -threads 5 -algorithm:ms_levels 2'
+        subprocess.call(pickpeakcommand.format(i=mzml, o=mzml).split(),stderr=logfile, stdout=logfile)
 
-    ##### NEW  #####
-
-    commandComet = 'CometAdapter -in {i} -out {o} -threads 20 -database {d} -precursor_mass_tolerance {pmt} -fragment_bin_tolerance {fmt} -fragment_bin_offset {fbo} -num_hits {n} -digest_mass_range {dmr}'.format(i=mzml, o=idPath, d=fasta_decoy_path, pmt=pmt, fmt=fmt, fbo=fbo, n=num_hits, dmr=dmr) 
+    #peptide search using comet
+    commandComet = 'CometAdapter -in {i} -out {o} -threads 5 -database {d} -precursor_mass_tolerance {pmt} -fragment_bin_tolerance {fmt} -fragment_bin_offset {fbo} -num_hits {n} -digest_mass_range {dmr}'.format(i=mzml, o=idPath, d=fasta_decoy_path, pmt=pmt, fmt=fmt, fbo=fbo, n=num_hits, dmr=dmr) 
     subprocess.call(commandComet.split() + ["-fixed_modifications", "Carbamidomethyl (C)", "-variable_modifications", "Oxidation (M)", "-enzyme", "unspecific cleavage"],stderr=logfile, stdout=logfile)
 
-    peptideIndexer = 'PeptideIndexer -in {f} -out {o} -threads 20 -fasta {d} -decoy_string XXX -enzyme:specificity none -enzyme:name '.format(f=idPath, o=idPath, d=fasta_decoy_path)
+    #index decoy and target hits
+    peptideIndexer = 'PeptideIndexer -in {f} -out {o} -threads 5 -fasta {d} -decoy_string DECOY -enzyme:specificity none -enzyme:name '.format(f=idPath, o=idPath, d=fasta_decoy_path)
     subprocess.call(peptideIndexer.split()  + ["unspecific cleavage"],stderr=logfile, stdout=logfile)
 
+    #calculate fdr
+    falseDiscovery = 'FalseDiscoveryRate -in {f} -out {o} -threads 5'.format(f=idPath,o=idPath.replace('.idXML','_aligner.idXML'))
+    subprocess.call(falseDiscovery.split(),stderr=logfile, stdout=logfile)
+
+    #filter by provided FDR value generate aligner maps for map transformation
+    idFilter = 'IDFilter -best:strict  -in {f} -out {o} -score:pep {m} -remove_decoys -threads 5'.format(f=idPath.replace('.idXML','_aligner.idXML'), o=idPath.replace('.idXML','_aligner.idXML'), m=fdr)
+    subprocess.call(idFilter.split(),stderr=logfile, stdout=logfile)
     idFiles.append(idPath)
 
+    #id based map transformation genereate aligned idXML maps and trafoXMLs
+    alignerMaps=[a.replace('.idXML', '_aligner.idXML') for a in idFiles]
+    alignedMaps=[a.replace('.idXML', '_aligned.idXML') for a in idFiles]
+    trafoMaps=[a.replace('.idXML', '.trafoXML') for a in idFiles]
+    MapAlignerID = 'MapAlignerIdentification -in {f} -out {o} -trafo_out {t} -threads 5'.format(f=" ".join(alignerMaps), o=" ".join(alignedMaps), t=" ".join(trafoMaps))
+    subprocess.call(MapAlignerID.split(), stderr=logfile, stdout=logfile)
 
 
-############# insert id based map transformation
-
-mzmlFiles = [m.replace('.gz', '') for m in mzmlFiles]
-alignedMaps=[a.replace('.idXML', '_aligned.idXML') for a in idFiles]
-trafoMaps=[a.replace('.idXML', '.trafoXML') for a in idFiles]
-MapAlignerID = 'MapAlignerIdentification -in {f} -out {o} -trafo_out {t} -threads 20'.format(f=" ".join(idFiles), o=" ".join(alignedMaps), t=" ".join(trafoMaps))
-subprocess.call(MapAlignerID.split(), stderr=logfile, stdout=logfile)
-
+#align mzml using trafoXMLs
 for Map in trafoMaps:
     mzml = mzmlFiles[trafoMaps.index(Map)]
-    trafoMZML=mzml.replace('.mzML', '_trafo.mzML')
-    MapTransformer = 'MapRTTransformer -in {f} -out {o} -trafo_in {m} -threads 20'.format(m=Map, f=mzml, o=trafoMZML)
+    trafoMZML=mzml #.replace('.mzML', '_trafo.mzML')
+    MapTransformer = 'MapRTTransformer -in {f} -out {o} -trafo_in {m} -threads 5'.format(m=Map, f=mzml, o=trafoMZML)
     subprocess.call(MapTransformer.split(), stderr=logfile, stdout=logfile)
 
-idFiles=alignedMaps
-#############
+#align all content idXMLs using trafoXMLs
+for Map in trafoMaps:
+    ID = mzmlFiles[trafoMaps.index(Map)].replace('.mzML', '.idXML')
+    trafoID = ID
+    MapTransformer = 'MapRTTransformer -in {f} -out {o} -trafo_in {m} -threads 5'.format(m=Map, f=ID, o=trafoID)
+    subprocess.call(MapTransformer.split(), stderr=logfile, stdout=logfile)
 
 
-
-### predict hits of fitting length and calc FDR and PEP
-#FDR calc
-
-## FileMerging
-#### change f and o
-
-identifer_for_files = idFiles[0].split('/')[-1]
-
-idresult = os.path.join(result_path, identifer_for_files.replace('.idXML','_merged.idXML'))
-FileMerger = 'IDMerger -in {f} -out {o} -threads 20 -annotate_file_origin'.format(f=' '.join(idFiles),o=idresult)
+#merge all ids
+identifer_for_files = idFiles[0].split('/')[-1]    
+idresult_all = os.path.join(result_path, identifer_for_files.replace('.idXML','_merged_all.idXML'))
+FileMerger = 'IDMerger -in {f} -out {o} -threads 5 -annotate_file_origin'.format(f=' '.join(idFiles),o=idresult_all)
 subprocess.call(FileMerger.split(),stderr=logfile, stdout=logfile)
 
+if num_hits >= 2:
+    #filter for rank2 hits
+    idresult_rank2 = os.path.join(result_path, identifer_for_files.replace('.idXML','_merged_rank2.idXML'))
+    idFilter = 'IDFilter -best:n_to_m_peptide_hits 2:3  -in {f} -out {o} -score:pep 999 -threads 5'.format(f=idresult_all, o=idresult_rank2)
+    subprocess.call(idFilter.split(),stderr=logfile, stdout=logfile)
+
+    #export merged rank2 ids and all metavalues
+    convert = 'TextExporter -in {f} -out {o} -id:add_hit_metavalues 0 -id:add_metavalues 0 -id:peptides_only'.format(f=idresult_rank2, o=idresult_rank2.replace('.idXML', '.csv'))
+    subprocess.call(convert.split(),stderr=logfile, stdout=logfile)
+
+#filter for rank1 hits
+idresult = os.path.join(result_path, identifer_for_files.replace('.idXML','_merged.idXML'))
+idFilter = 'IDFilter -best:strict  -in {f} -out {o} -score:pep 999 -threads 5'.format(f=idresult_all, o=idresult)
+subprocess.call(idFilter.split(),stderr=logfile, stdout=logfile)
+
+#export merged rank1 ids and all metavalues
+convert = 'TextExporter -in {f} -out {o} -id:add_hit_metavalues 0 -id:add_metavalues 0 -id:peptides_only'.format(f=idresult, o=idresult.replace('.idXML', '_rank1.csv'))
+subprocess.call(convert.split(),stderr=logfile, stdout=logfile)   
+
+#calculate fdr on merged rank1 hits
 idresult_fdr = os.path.join(result_path, identifer_for_files.replace('.idXML', '_merged_fdr.idXML'))
-falseDiscovery = 'FalseDiscoveryRate -in {f} -out {o} -threads 20 -algorithm:add_decoy_peptides -algorithm:use_all_hits'.format(f=idresult,o=idresult_fdr)
+falseDiscovery = 'FalseDiscoveryRate -in {f} -out {o} -threads 5 -algorithm:add_decoy_peptides'.format(f=idresult,o=idresult_fdr)
 subprocess.call(falseDiscovery.split(),stderr=logfile, stdout=logfile)
 
-### extract Percolator Features with PSMFeatureExtractor on Mathias TopPerc branch
+#extract Percolator Features with PSMFeatureExtractor
 idresult_fdr_psm = os.path.join(result_path, identifer_for_files.replace('.idXML', '_merged_fdr_psm.idXML'))
-PSMFeat = 'PSMFeatureExtractor -in {f} -out {o} -threads 20'.format(f=idresult_fdr,o=idresult_fdr_psm)
+PSMFeat = 'PSMFeatureExtractor -in {f} -out {o} -threads 5'.format(f=idresult_fdr,o=idresult_fdr_psm)
 subprocess.call(PSMFeat.split(),stderr=logfile, stdout=logfile)
 
-### run Percolator with PercolatorAdapter on Mathias TopPerc branch
+#run Percolator
 idresult_perc = os.path.join(result_path, '{}_merged_perc.idXML'.format(identifer_for_files))
-Percolator = 'PercolatorAdapter -in {f} -out {o} -decoy-pattern XXX -debug 10 -threads 20 -enzyme no_enzyme -trainFDR 0.05 -testFDR 0.05'.format(f=idresult_fdr_psm,o=idresult_perc)
+Percolator = 'PercolatorAdapter -in {f} -out {o} -decoy-pattern DECOY -debug 10 -threads 5 -enzyme no_enzyme -trainFDR 0.05 -testFDR 0.05'.format(f=idresult_fdr_psm,o=idresult_perc)
 subprocess.call(Percolator.split(),stderr=logfile, stdout=logfile)
 
 #filter by provided FDR value
 idresult_filtered = os.path.join(result_path, '{}_merged_perc_fdr_filtered.idXML'.format(identifer_for_files))
-idFilter = 'IDFilter  -in {f} -out {o} -score:pep {m} -remove_decoys -threads 20'.format(f=idresult_fdr_psm, o=idresult_filtered, m=fdr)
+idFilter = 'IDFilter  -in {f} -out {o} -score:pep {m} -remove_decoys -threads 5'.format(f=idresult_perc, o=idresult_filtered, m=fdr)
 subprocess.call(idFilter.split(),stderr=logfile, stdout=logfile)
 
-#IDRipper
-#idresult_folder = os.path.join(result_path, '{}'.format(identifer_for_files))
-#IDRipper = 'IDRipper  -in {f} -out {o} -threads 20'.format(f=idresult_filtered, o=idresult_folder)
-#subprocess.call(IDRipper.split(),stderr=logfile, stdout=logfile)
+#export merged filtered ids and all metavalues
+convert = 'TextExporter -in {f} -out {o} -id:add_hit_metavalues 0 -id:add_metavalues 0 -id:peptides_only'.format(f=idresult_filtered, o=idresult_filtered.replace('.idXML', '.csv'))
+subprocess.call(convert.split(),stderr=logfile, stdout=logfile)
 
-#IDMerger
+#find features for merged filtered ids using feature finder identification
 features = []
 files = [i for i in idFiles]
 
+#assume all ids as internal ids
 for file in files:
    internal=idresult_filtered
-   ### map percolator refined and FDR filtered ids onto features
    mergeresult = os.path.join(result_path, file.replace('idXML', 'featureXML').split('/')[-1])
    features.append(mergeresult)
-   IDMapper = 'FeatureFinderIdentification -in {f} -id {i} -threads 20 -out {o}'.format(f=file.replace('_aligned.idXML','_trafo.mzML'),i=internal,o=mergeresult)
+   IDMapper = 'FeatureFinderIdentification -in {f} -id {i} -threads 5 -out {o}'.format(f=file.replace('.idXML','.mzML'),i=internal,o=mergeresult)
    subprocess.call(IDMapper.split(),stderr=logfile, stdout=logfile)
 
-## FeatureLinking
+#Link features of all replicate mzmls to one consensus file
 mergeresult = os.path.join(result_path, idFiles[0].split('/')[-1].replace('idXML', 'consensusXML'))
-FeatLinker = 'FeatureLinkerUnlabeledKD -in {f} -out {o} -threads 20'.format(f=' '.join(features), o=mergeresult)
+FeatLinker = 'FeatureLinkerUnlabeledKD -in {f} -out {o} -threads 5'.format(f=' '.join(features), o=mergeresult)
 subprocess.call(FeatLinker.split(),stderr=logfile, stdout=logfile)
 
-## IDConflictResolver
+#Resolve conflicts of different ids matching the same feature
 ConfSolver = 'IDConflictResolver -in {f} -out {o}'.format(f=mergeresult,o=mergeresult)
 subprocess.call(ConfSolver.split(),stderr=logfile, stdout=logfile)
 
-
-########################################################################################
-
+#export consensus feature content
 convert = 'TextExporter -in {f} -out {o} -id:add_hit_metavalues 0'.format(f=mergeresult, o=mergeresult.replace('.consensusXML', '.csv'))
 subprocess.call(convert.split(),stderr=logfile, stdout=logfile)
 
-########################################################################################
-
+#format output csvs
 op=open(mergeresult.replace('.consensusXML', '.csv'))
 opr=op.readlines()
 op.close()
@@ -168,34 +193,40 @@ df = []
 
 for i, r in enumerate(opr):
     if r.startswith('#PEPTIDE'):
-        header = r.strip().split('\t')[1:] + opr[i - 1].strip().split('\t')[1:]
+    header = r.strip().split('\t')[1:] + opr[i - 1].strip().split('\t')[1:]
     if r.startswith('PEPTIDE'):
-        if not opr[i-1].startswith('PEPTIDE'):
-            df.append(r.strip().split('\t')[1:] + opr[i - 1].strip().split('\t')[1:])
+    if not opr[i-1].startswith('PEPTIDE'):
+        df.append(r.strip().split('\t')[1:] + opr[i - 1].strip().split('\t')[1:])
 
 df=pd.DataFrame(df)
 df.columns=header
 df.to_csv(mergeresult.replace('.consensusXML', '_edit.csv'))
 
-seqs=df['sequence'].values.tolist()
-seqs_new=[]
-for seq in seqs:
-    m = re.findall("\(\w+\)", seq)
-    for i in m:
-        seq = seq.replace(i, "")
-    seqs_new.append(seq)
-
-seqs_new=list(set(seqs_new))
-df['sequence']=df['sequence'].str.replace("\(\w+\)","")
-
-Final_df={}
-Final_df_header=['fdr', 'xcorr', 'deltacn', 'median_intensity']
-for seq in seqs_new:
-    row=df[df['sequence']==seq].sort('score').iloc[[0]]
-    Final_df[seq]=[row['score'].values.tolist()[0],row['MS:1002252'].values.tolist()[0],row['MS:1002253'].values.tolist()[0],row['intensity_cf'].values.tolist()[0]]
-Final_df=pd.DataFrame(Final_df).transpose()
-Final_df.columns=Final_df_header
-Final_df.to_csv(mergeresult.replace('.consensusXML', '_extracted.csv'))
+#join consensus feature ids with merged rank1 ids on sequence, get number of psms and write all in one table
+idexport_filtered=pd.read_csv(idresult_filtered.replace('.idXML', '.csv'), sep='\t')
+idexport_rank1=pd.read_csv(idresult.replace('.idXML', '_rank1.csv'), sep='\t')
+idexport_edit=pd.read_csv(mergeresult.replace('.consensusXML', '_edit.csv'), sep=',')
+idexport_edit=idexport_edit[['sequence', 'rt_cf', 'mz_cf', 'intensity_cf']]
+idexport_filtered=idexport_filtered.loc[idexport_filtered.groupby('sequence')['score'].idxmin()]
+idexport_filtered=idexport_filtered[['sequence','score','COMET:deltCn','expect_score','file_origin','spectrum_reference','COMET:IonFrac','MS:1002252']]
+merged=idexport_edit.merge(idexport_filtered, on='sequence', how='left')
+num=idexport_rank1.groupby('sequence').apply(len).reset_index()
+num.columns=['sequence','num_psms']
+merged=merged.merge(num, on='sequence', how='left')
+idexport_rank1=idexport_rank1.loc[idexport_rank1.groupby('sequence')['score'].idxmin()]
+idexport_rank1=idexport_rank1[['sequence','accessions']]
+merged=merged.merge(idexport_rank1, on='sequence', how='left')
+if num_hits>=2:
+    idexport_rank2=pd.read_csv(idresult.replace('.idXML', '_rank2.csv'), sep='\t')
+    idexport_rank2=idexport_rank2[['sequence','accessions','score','MS:1002252','spectrum_reference','file_origin']]
+    idexport_rank2.columns=['sequence_rank2','accessions_rank2','score_rank2','MS:1002252_rank2','spectrum_reference','file_origin']
+    merged=merged.merge(idexport_rank2, on=['spectrum_reference','file_origin'], how='left')
+    merged=merged[['spectrum_reference','file_origin','sequence', 'score', 'rt_cf', 'mz_cf', 'intensity_cf','accessions','num_psms','expect_score','COMET:IonFrac','MS:1002252','sequence_rank2','accessions_rank2','MS:1002252_rank2']]
+    merged.columns=['spectrum_reference','file_origin','sequence', 'fdr', 'rt_cf', 'mz_cf', 'intensity_cf','accessions','num_psms','expect_score','COMET:IonFrac','XCorr','sequence_rank2','accessions_rank2','XCorr_rank2']
+    merged['deltaCn']=merged['XCorr']-merged['XCorr_rank2']/merged['XCorr']
+else:
+    merged=merged[['spectrum_reference','file_origin','sequence', 'score', 'rt_cf', 'mz_cf', 'intensity_cf','accessions','num_psms','expect_score','COMET:IonFrac','MS:1002252']]
+    merged.columns=['spectrum_reference','file_origin','sequence', 'fdr', 'rt_cf', 'mz_cf', 'intensity_cf','accessions','num_psms','expect_score','COMET:IonFrac','XCorr']
+merged.to_csv(mergeresult.replace('.consensusXML', '_final_output.csv'))
 
 logfile.close()
-subprocess.call(["mv", logfilename, log_path])
