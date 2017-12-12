@@ -69,8 +69,8 @@ for mzml in mzmlFiles:
 
     #run peak picker if not centroided
     if centroided == 'false':
-        pickpeakcommand = 'PeakPickerHiRes -in {i} -out {o} -threads 5 -algorithm:ms_levels 2'
-        subprocess.call(pickpeakcommand.format(i=mzml, o=mzml).split(),stderr=logfile, stdout=logfile)
+        pickpeakcommand = 'PeakPickerHiRes -in {i} -out {o} -threads 5 -algorithm:ms_levels {ms}'
+        subprocess.call(pickpeakcommand.format(i=mzml, o=mzml,ms=msLevels).split(),stderr=logfile, stdout=logfile)
 
     #peptide search using comet
     commandComet = 'CometAdapter -in {i} -out {o} -threads 5 -database {d} -precursor_mass_tolerance {pmt} -fragment_bin_tolerance {fmt} -fragment_bin_offset {fbo} -num_hits {n} -digest_mass_range {dmr}'.format(i=mzml, o=idPath, d=fasta_decoy_path, pmt=pmt, fmt=fmt, fbo=fbo, n=num_hits, dmr=dmr) 
@@ -228,7 +228,7 @@ if num_hits>=2:
     merged['deltaCn']=merged['XCorr']-merged['XCorr_rank2']/merged['XCorr']
 else:
     merged=merged[['spectrum_reference','file_origin','sequence', 'score', 'rt_cf', 'mz_cf', 'intensity_cf','accessions','num_psms','expect_score','COMET:IonFrac','MS:1002252']]
-    merged.columns=['spectrum_reference','file_origin','sequence', 'fdr', 'rt_cf', 'mz_cf', 'intensity_cf','accessions','num_psms','expect_score','COMET:IonFrac','XCorr']
+    merged.columns=['spectrum_reference','file_origin','sequence', 'fdr', 'rt_cf', 'mz_cf', 'intensity','accessions','num_psms','expect_score','COMET:IonFrac','XCorr']
 merged.to_csv(mergeresult.replace('.consensusXML', '_final_output.csv'))
 
 logfile.close()
